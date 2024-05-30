@@ -1,0 +1,42 @@
+name: Papi Data Cli Container Build Document
+description: Automates the build of data cli container image
+schemaVersion: 1.0
+parameters:
+  - awsAccountID:
+      type: string
+      default: ""
+      description: Account ID.
+  - awsRegion:
+      type: string
+      default: ""
+      description: Region.
+
+phases:
+  - name: build
+    steps:
+      - name: DatacliContainerBuild
+        action: ExecuteBash
+        inputs:
+          commands:
+            - mkdir $HOME/data-cli
+            - cd $HOME/data-cli
+            - echo "STARTING GIT CLONE"
+            - git clone "https://github.com/privacysandbox/protected-auction-key-value-service"
+            - cd $HOME/data-cli/protected-auction-key-value-service
+            - echo "STARTING DATA CLI BUILD"
+            - builders/tools/bazel-debian run //production/packaging/tools:copy_to_dist --//:instance=local --//:platform=local
+            - echo "LOAD CONTAINER STEP"
+            - docker load -i dist/tools_binaries_docker_image.tar
+            - echo "DONE WITH DATA CLI BUILD"
+            - export AWS_ACCOUNT_ID={{ awsAccountID }}
+            - export AWS_DEFAULT_REGION={{ awsRegion }}
+            - ECR_REPO="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+            - IMAGE_REPO_NAME="papi-kv-ecr-repo"
+            - IMAGE_REPO_TAG="tools_binaries_docker_image"
+            - REPO_PATH="${ECR_REPO}/${IMAGE_REPO_NAME}:${IMAGE_REPO_TAG}"
+            - echo "STARTING DOCKER LOGIN"
+            - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
+            - docker tag bazel/production/packaging/tools:tools_binaries_docker_image $REPO_PATH
+            - echo "STARTING DOCKER PUSH OF DATA CLI"
+            - docker push $REPO_PATH
+            - echo "DONE"

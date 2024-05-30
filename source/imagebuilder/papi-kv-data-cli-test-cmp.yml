@@ -1,0 +1,25 @@
+name: Papi Data Cli Container test Document
+description: Automates the test of data cli container image
+schemaVersion: 1.0
+
+phases:
+  - name: test
+    steps:
+      - name: TestContainer
+        action: ExecuteBash
+        inputs:
+          commands:
+            - cd $HOME/data-cli/
+            - echo "starting docker service"
+            - service docker start
+            - docker run --entrypoint=/tools/data_cli/data_cli bazel/production/packaging/tools:tools_binaries_docker_image --help
+            - echo "finished testing container help command"
+            - echo "creating test data file"
+            - echo "key,mutation_type,logical_commit_time,value,value_type" > data.csv
+            - echo "key1,UPDATE,1680815895468055,value1,string" >> data.csv
+            - echo "key2,UPDATE,1680815895468056,value2,string" >> data.csv
+            - echo "key1,UPDATE,1680815895468057,value11,string" >> data.csv
+            - echo "key2,DELETE,1680815895468058,value2,string" >> data.csv
+            - echo "starting test delta file gen"
+            - docker run --volume=$PWD:$PWD --user $(id -u ${USER}):$(id -g ${USER}) --entrypoint=/tools/data_cli/data_cli bazel/production/packaging/tools:tools_binaries_docker_image format_data --input_file="$PWD/data.csv" --input_format=CSV --output_file="$PWD/DELTA_0000000000000001" --output_format=DELTA
+            - ls -l DELTA_0000000000000001

@@ -1,0 +1,11 @@
+{
+    "build-infra": "imagebuilder",
+    "build-instance-type": "m3.large",
+    "cli-compute": "ecs",
+    "input-bucket-pfx": "mybucket",
+    "input-key":"input",
+    "output-bucket-name": "mybucketname",
+    "output-key":"output",
+    "vpc-id":"myvpc",
+    "alb-arn":"my-alb-arn"
+}

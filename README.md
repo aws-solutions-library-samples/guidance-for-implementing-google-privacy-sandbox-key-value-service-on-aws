@@ -1,215 +1,224 @@
-# Guidance Title (required)
+# Guidance for implementing Google's Privacy Sandbox Key/Value Service on AWS
 
-The Guidance title should be consistent with the title established first in Alchemy.
+## Table of Content
 
-**Example:** *Guidance for Product Substitutions on AWS*
-
-This title correlates exactly to the Guidance it’s linked to, including its corresponding sample code repository. 
-
-
-## Table of Content (required)
-
-List the top-level sections of the README template, along with a hyperlink to the specific section.
-
-### Required
-
-1. [Overview](#overview-required)
+1. [Overview](#overview)
     - [Cost](#cost)
-2. [Prerequisites](#prerequisites-required)
-    - [Operating System](#operating-system-required)
-3. [Deployment Steps](#deployment-steps-required)
-4. [Deployment Validation](#deployment-validation-required)
-5. [Running the Guidance](#running-the-guidance-required)
-6. [Next Steps](#next-steps-required)
-7. [Cleanup](#cleanup-required)
+2. [Prerequisites](#prerequisites)
+    - [Operating System](#operating-system)
+3. [Deployment Steps](#deployment-steps)
+4. [Deployment Validation](#deployment-validation)
+5. [Running the Guidance](#running-the-guidance)
+6. [Next Steps](#next-steps)
+7. [Cleanup](#cleanup)
+8. [FAQ, known issues, additional considerations, and limitations](#faq-known-issues-additional-considerations-and-limitations)
+9. [Revisions](#revisions)
+10. [Notices](#notices)
+11. [Authors](#authors)
+
+## Overview
+This guide walks you through the deployment of the data loader stack. This stack is part of the overall Guidance for Implementing Google Chrome's Privacy Sandbox Key Value Service on AWS. It automates the infrastructure build required to ingest data in to Key Value Server
+
+
+### Architecture Overview
+#### Key Value Server Architecture
+![architecture diagram](./assets/main_ra.png)
+#### Data flow architecture
+![architecture diagram](./assets/data_loader_ra.png)
+#### Code Build architecture
+![architecture diagram](./assets/data_loader_build_ra.png)
+This stack deploys five sub stacks
+1. VPC Stack - Creates a new stack or use an existing VPC resource based on input through cdk context
+2. S3 Stack - Creates S3 buckets based on inputs.
+    1. Input S3 bucket - where the existing first party data will land
+    2. Output S3 bucket - If an input is given, the stack will look for that resource and use it. WIll reuse the input bucket
+3. Data CLI build stack - Deploys two software build pipeline options
+    1. A stepfunction workflow that launches an EC2 instance to build Data CLI tool container and a container packaged with Data cli tool and AWS CLI to complete the data formatter application package
+    2. An imagebuilder pipeline that builds an AMI and container images that package the data formatter applicaton. 
+4. Data formater application stack. The stack deploys an example data processing workflow S3(input bucket) -> EventBridge -> ECS -> S3(output bucket/ bucket from the terraform stack). The stack can build one of the below container image based on inputs
+    1. An AWS CLI based container
+    2. A pyhon SDK based container - This option is selected by default because the size of the container image is less compared to AWS CLI based image (40mb vs 240mb)
+5. WAF stack - deploys web application firewall rules that inspects the incoming traffic from chrome browser to the ELB front ending the Key value server
+### Cost
+
+_You are responsible for the cost of the AWS services used while running this Guidance. As of May 2024, the cost for running this Guidance with the default settings in the N. Virginia  is approximately $2,525 per month for processing 1b real time requests on the Key value server and running 1 minute batches of data upload from S3.![alt text](./assets/cost-estimate.png)_
+_Refer this [AWS Cost Calculator](https://calculator.aws/#/estimate?id=e4da3eccca5699934227d6939f1576c79de1e8be) for assumptions used in the estimation._
+## Prerequisites
+
+### Operating System
+
+The project code uses the Python version of the AWS CDK ([Cloud Development Kit](https://aws.amazon.com/cdk/)). To execute the project code, please ensure that you have fulfilled the [AWS CDK Prerequisites for Python](https://docs.aws.amazon.com/cdk/latest/guide/work-with-cdk-python.html). Steps for a macOS machine is captured here.  Deployment in another OS may require additional steps.
+
+1. Install homebrew
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+2. Install Python
+```
+brew install python
+```
+3. Install Git client
+```
+brew install git
+```
+4. Install AWS CLI
+```
+brew install awscli
+```
+5. Create CLI credentials using IAM in AWS console and Configure CLI profiles
+```
+aws configure --profile <profile name>
+```
+
+### Third-party tools
+#### Google Chrome Privacy Sandbox Protected Audience API CLI Tool
+This stack packages the [Data CLI tool](https://github.com/privacysandbox/protected-auction-key-value-service/blob/release-0.16/docs/data_loading/loading_data.md) developed by Google to convert incoming data in to the format key value server can ingest.
+
+### Python Dependencies
+Review [requirements.txt](./requirements.txt) for the python dependencies
+
+### AWS account requirements
+The stack requires input parameters that includes the S3 bucket that the Key value server listens to for ingesting data. Deploy the [terraform stack](https://github.com/privacysandbox/protected-auction-key-value-service/blob/release-0.16/docs/deployment/deploying_on_aws.md) and capture the S3 bucket name.
+
+
+### AWS CDK bootstrap
+
+The project code requires that the AWS account is [bootstrapped](https://docs.aws.amazon.com/de_de/cdk/latest/guide/bootstrapping.html) in order to allow the deployment of the CDK stack. Bootstrap CDK on the CLI profile you created earlier
+```
+cdk bootstrap --profile <profile name>
+```
+
+### Service limits
+NA
+
+### Supported Regions
+All regions where the component services used in the stack are available.
+
+## Deployment Steps
+__Important__: Follow the [Key/Value Server setup instructions](./KV_Server_setup.md) in order to set up the AWS infrastructure and to run the Key/Value server.
+
+1. Clone this repository to your development desktop
+```
+git clone git@github.com:aws-solutions-library-samples/guidance-for-impelementing-google-chromes-privacy-sandbox-key-value-server.git
+```
+2. Use [envsetup.sh](./envsetup.sh) to setup virtual environment and install python dependencies
+
+3. Create a [cdk.context.json](cdk.context.json) file. A example [cdk.context.json.example](cdk.context.json.example)is available in the repo 
+    1. Update the parameters as required
+```
+{
+    "build-infra": "imagebuilder", # Required imagebuilder/stepfunction/all
+    "build-instance-type": "m3.large", # Required, keep this default. This is only used in the stepfunction stack in this version
+    "cli-compute": "ecs", # Required ec2/ecs/lambda/all
+    "elb-arn":"my-elb-arn", # Required ARN of the ELB from Key/Value Server setup instructions.
+    "input-bucket-pfx": "mybucket", # Optional Give only the prefix following s3 naming standards. This will be appended with account and region generate unique bucket url. If this input is not given, stack will generate a unique name.
+    "output-bucket-name": "mybucketname", # Optional name of the bucket that is created by terraform stack. If this input is not given, input bucket is used as output bucket.
+    "output-key":"output", # Optional key in bucket that is created by terraform stack where key value server listens to incoming files. If this input is not given, stack will use defaults
+    "input-key":"input", # S3 path key where the inputfiles CSV will land. If this input is not given, stack will use defaults
+    "vpc-id":"myvpc" # Optional VPC id from the terraform stack. If this input is not given, stack creates new vpc.
+    "alb-arn":"my-alb-arn" # ARN of the ALB from Key/Value Server setup instructions.
+}
+
+ ```
+ * cli-compute - This stack provides multiple copute options for running data format conversion. ECS is recommended to handle large batches of data and horizontal scaling.
+ * build-infra - One component of this stack stack builds the data cli container image. This data cli build stack supports two options - "imagebuilder" and "stepfunction". Using imagebuilder is recommended.
+
+5. Review the infrastructure components being deployed
+```
+# vpc stack
+cdk synth papi_vpc --profile=<profile name>
+# s3 stack
+cdk synth s3_stack --profile=<profile name>
+# data cli build stack
+cdk synth data_cli_build_stack --profile=<profile name>
+# data loader stack
+cdk synth data_loader_stack--profile=<profile name>
+# all
+cdk synth --profile=<profile name>
+```
+6. Deploy the workflow sample code and related AWS services used in the Entity resolution workflow
+```
+# vpc stack
+cdk deploy papi_vpc --profile=<profile name>
+# s3 stack
+cdk deploy s3_stack --profile=<profile name>
+# data cli build stack - depends on s3 and vpc stack
+cdk deploy data_cli_build_stack --profile=<profile name>
+# data loader stack - depends on data cli build stack
+cdk deploy data_loader_stack--profile=<profile name>
+# all
+cdk deploy --profile=<profile name>
+```
+
+## Deployment Validation
+
+* Open CloudFormation console and verify the status of the template with the name starting with stack.
+* If deployment is successful, you should see below resources in the console.
+    1. S3 buckets
+    2. EventBridge Rule connecting S3 buckets to ECS tasks
+    3. ECS cluster and associated resources
+    4. ECR Repo
+    5. Imagebuilder Pipeline and resources
+    6. Stepfunction statemachine
+    7. IAM roles
+
+## Running the Guidance
+
+### Guidance inputs
+
+1. Locate the image builder pipeline or stepfunction to build the data formatter application container image and run it. This could take up to 2 hrs to complete
+2. Verify that there is an AMI and three container images tags published in the ECR repo
+3. Upload the sample data.csv in to the input data bucket/input folder in S3. This will run the Event bridge rule, and launch an ECS task that does the data format conversion
+4. Check the ECS task logs. You will need to use the filter "All Statuses" in the console to see the past executions. Usually this execution should complete within 30 seconds of the file upload. Run time could vary based on the file size
+
+### Expected output
+You should be able to see a new file with pattern ```<input_filename>_DELTA``` in the output s3 bucket/key
+### Output description
+The output file is in the format 
+## Next Steps
+Test if the ingested key values made it to the key value server by running get api calls on the key value server
+
+## Cleanup
+
+1. When you’re finished experimenting with this solution, clean up your resources by running the command:
+
+```
+# data collection stack
+cdk destroy papi_vpc --profile=<profile name>
+# s3 stack
+cdk destroy s3_stack --profile=<profile name>
+# data cli build stack - depends on s3 and vpc stack
+cdk destroy data_cli_build_stack --profile=<profile name>
+# data loader stack - depends on data cli build stack
+cdk destroy data_loader_stack--profile=<profile name>
+# all
+cdk destroy --profile=<profile name>
+```
+2. Manually delete the container images and the container repo from ECR
+
+
+## FAQ, known issues, additional considerations, and limitations
+
+**Known issues**
+- While running cdk destroy the ECR Container images and the repo are not removed by default. This might result in cdk error on re-deployment in to the same account. Delete the images manually
+- Imagebuilder resources if changed in the CDK, version increments needs to be explicitly added to the the resource definition. CDK could fail otherwise on update deployments
+- Certain instance types in the input for infrastructure config of imagebuilder pipeline may result in cpu architecture conflict with the parent_image option in image recipe config. For example m3.large and arn:aws:imagebuilder:{region}:aws:image/ubuntu-server-22-lts-arm64/x.x.x have conflicts
+
+**Additional considerations**
+- The AWS CLI container image size could be optimized further by using light weight ubuntu/debian images. Edit the docker files as required to optimize further. The Python SDK is using Distroless image as base and has been observed to be having the smallest size
+- The eventbridge rule configured by the stack expects a .csv suffix. Change stack as required
+- Use [privacy sandbox benchmark testing tool](https://github.com/privacysandbox/protected-auction-key-value-service/blob/release-0.16/docs/data_loading/data_loading_capabilities.md#benchmarking-tool) to generate higher volumes of data to test the performance of this stack
+- This stack is intented to be run as is in a Dev/Sandbox environment. Modify the stack and apply your security and business continuity best practices in production
+- For any feedback, questions, or suggestions, please use the issues tab under this repo.
+
+## Revisions
+
+
+## Notices
 
-***Optional***
-
-8. [FAQ, known issues, additional considerations, and limitations](#faq-known-issues-additional-considerations-and-limitations-optional)
-9. [Revisions](#revisions-optional)
-10. [Notices](#notices-optional)
-11. [Authors](#authors-optional)
-
-## Overview (required)
-
-1. Provide a brief overview explaining the what, why, or how of your Guidance. You can answer any one of the following to help you write this:
-
-    - **Why did you build this Guidance?**
-    - **What problem does this Guidance solve?**
-
-2. Include the architecture diagram image, as well as the steps explaining the high-level overview and flow of the architecture. 
-    - To add a screenshot, create an ‘assets/images’ folder in your repository and upload your screenshot to it. Then, using the relative file path, add it to your README. 
-
-### Cost ( required )
-
-This section is for a high-level cost estimate. Think of a likely straightforward scenario with reasonable assumptions based on the problem the Guidance is trying to solve. Provide an in-depth cost breakdown table in this section below ( you should use AWS Pricing Calculator to generate cost breakdown ).
-
-Start this section with the following boilerplate text:
-
-_You are responsible for the cost of the AWS services used while running this Guidance. As of <month> <year>, the cost for running this Guidance with the default settings in the <Default AWS Region (Most likely will be US East (N. Virginia)) > is approximately $<n.nn> per month for processing ( <nnnnn> records )._
-
-Replace this amount with the approximate cost for running your Guidance in the default Region. This estimate should be per month and for processing/serving resonable number of requests/entities.
-
-Suggest you keep this boilerplate text:
-_We recommend creating a [Budget](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html) through [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) to help manage costs. Prices are subject to change. For full details, refer to the pricing webpage for each AWS service used in this Guidance._
-
-### Sample Cost Table ( required )
-
-**Note : Once you have created a sample cost table using AWS Pricing Calculator, copy the cost breakdown to below table and upload a PDF of the cost estimation on BuilderSpace.**
-
-The following table provides a sample cost breakdown for deploying this Guidance with the default parameters in the US East (N. Virginia) Region for one month.
-
-| AWS service  | Dimensions | Cost [USD] |
-| ----------- | ------------ | ------------ |
-| Amazon API Gateway | 1,000,000 REST API calls per month  | $ 3.50month |
-| Amazon Cognito | 1,000 active users per month without advanced security feature | $ 0.00 |
-
-## Prerequisites (required)
-
-### Operating System (required)
-
-- Talk about the base Operating System (OS) and environment that can be used to run or deploy this Guidance, such as *Mac, Linux, or Windows*. Include all installable packages or modules required for the deployment. 
-- By default, assume Amazon Linux 2/Amazon Linux 2023 AMI as the base environment. All packages that are not available by default in AMI must be listed out.  Include the specific version number of the package or module.
-
-**Example:**
-“These deployment instructions are optimized to best work on **<Amazon Linux 2 AMI>**.  Deployment in another OS may require additional steps.”
-
-- Include install commands for packages, if applicable.
-
-
-### Third-party tools (If applicable)
-
-*List any installable third-party tools required for deployment.*
-
-
-### AWS account requirements (If applicable)
-
-*List out pre-requisites required on the AWS account if applicable, this includes enabling AWS regions, requiring ACM certificate.*
-
-**Example:** “This deployment requires you have public ACM certificate available in your AWS account”
-
-**Example resources:**
-- ACM certificate 
-- DNS record
-- S3 bucket
-- VPC
-- IAM role with specific permissions
-- Enabling a Region or service etc.
-
-
-### aws cdk bootstrap (if sample code has aws-cdk)
-
-<If using aws-cdk, include steps for account bootstrap for new cdk users.>
-
-**Example blurb:** “This Guidance uses aws-cdk. If you are using aws-cdk for first time, please perform the below bootstrapping....”
-
-### Service limits  (if applicable)
-
-<Talk about any critical service limits that affect the regular functioning of the Guidance. If the Guidance requires service limit increase, include the service name, limit name and link to the service quotas page.>
-
-### Supported Regions (if applicable)
-
-<If the Guidance is built for specific AWS Regions, or if the services used in the Guidance do not support all Regions, please specify the Region this Guidance is best suited for>
-
-
-## Deployment Steps (required)
-
-Deployment steps must be numbered, comprehensive, and usable to customers at any level of AWS expertise. The steps must include the precise commands to run, and describe the action it performs.
-
-* All steps must be numbered.
-* If the step requires manual actions from the AWS console, include a screenshot if possible.
-* The steps must start with the following command to clone the repo. ```git clone xxxxxxx```
-* If applicable, provide instructions to create the Python virtual environment, and installing the packages using ```requirement.txt```.
-* If applicable, provide instructions to capture the deployed resource ARN or ID using the CLI command (recommended), or console action.
-
- 
-**Example:**
-
-1. Clone the repo using command ```git clone xxxxxxxxxx```
-2. cd to the repo folder ```cd <repo-name>```
-3. Install packages in requirements using command ```pip install requirement.txt```
-4. Edit content of **file-name** and replace **s3-bucket** with the bucket name in your account.
-5. Run this command to deploy the stack ```cdk deploy``` 
-6. Capture the domain name created by running this CLI command ```aws apigateway ............```
-
-
-
-## Deployment Validation  (required)
-
-<Provide steps to validate a successful deployment, such as terminal output, verifying that the resource is created, status of the CloudFormation template, etc.>
-
-
-**Examples:**
-
-* Open CloudFormation console and verify the status of the template with the name starting with xxxxxx.
-* If deployment is successful, you should see an active database instance with the name starting with <xxxxx> in        the RDS console.
-*  Run the following CLI command to validate the deployment: ```aws cloudformation describe xxxxxxxxxxxxx```
-
-
-
-## Running the Guidance (required)
-
-<Provide instructions to run the Guidance with the sample data or input provided, and interpret the output received.> 
-
-This section should include:
-
-* Guidance inputs
-* Commands to run
-* Expected output (provide screenshot if possible)
-* Output description
-
-
-
-## Next Steps (required)
-
-Provide suggestions and recommendations about how customers can modify the parameters and the components of the Guidance to further enhance it according to their requirements.
-
-
-## Cleanup (required)
-
-- Include detailed instructions, commands, and console actions to delete the deployed Guidance.
-- If the Guidance requires manual deletion of resources, such as the content of an S3 bucket, please specify.
-
-
-
-## FAQ, known issues, additional considerations, and limitations (optional)
-
-
-**Known issues (optional)**
-
-<If there are common known issues, or errors that can occur during the Guidance deployment, describe the issue and resolution steps here>
-
-
-**Additional considerations (if applicable)**
-
-<Include considerations the customer must know while using the Guidance, such as anti-patterns, or billing considerations.>
-
-**Examples:**
-
-- “This Guidance creates a public AWS bucket required for the use-case.”
-- “This Guidance created an Amazon SageMaker notebook that is billed per hour irrespective of usage.”
-- “This Guidance creates unauthenticated public API endpoints.”
-
-
-Provide a link to the *GitHub issues page* for users to provide feedback.
-
-
-**Example:** *“For any feedback, questions, or suggestions, please use the issues tab under this repo.”*
-
-## Revisions (optional)
-
-Document all notable changes to this project.
-
-Consider formatting this section based on Keep a Changelog, and adhering to Semantic Versioning.
-
-## Notices (optional)
-
-Include a legal disclaimer
-
-**Example:**
 *Customers are responsible for making their own independent assessment of the information in this Guidance. This Guidance: (a) is for informational purposes only, (b) represents AWS current product offerings and practices, which are subject to change without notice, and (c) does not create any commitments or assurances from AWS and its affiliates, suppliers or licensors. AWS products or services are provided “as is” without warranties, representations, or conditions of any kind, whether express or implied. AWS responsibilities and liabilities to its customers are controlled by AWS agreements, and this Guidance is not part of, nor does it modify, any agreement between AWS and its customers.*
 
+## Authors
 
-## Authors (optional)
-
-Name of code contributors
+- Ranjith Krishnamoorthy
+- Thyag Ramachandran

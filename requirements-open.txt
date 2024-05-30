@@ -1,0 +1,5 @@
+boto3
+aws-cdk-lib
+cdk-nag
+aws_solutions_constructs.aws_s3_lambda
+aws_solutions_constructs.aws_lambda_stepfunctions

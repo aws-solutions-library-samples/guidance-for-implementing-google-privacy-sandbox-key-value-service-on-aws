@@ -1,0 +1,52 @@
+name: Papi AWS CLI with Data ClI Container Build Document
+description: Automates the build of awscli + data cli container image
+schemaVersion: 1.0
+parameters:
+  - s3UrlDockerFile:
+      type: string
+      default: "s3://mybucket/key/Dockerfile"
+      description: Path of the dockerfile.
+  - s3UrlEntryPointScript:
+      type: string
+      default: "s3://mybucket/key/entrypoint.sh"
+      description: Path of the entrypoint script file.
+  - awsAccountID:
+      type: string
+      default: ""
+      description: Account ID.
+  - awsRegion:
+      type: string
+      default: "us-west-2"
+      description: Region.
+
+phases:
+  - name: build
+    steps:
+      - name: AWSDatacliContainerBuild
+        action: ExecuteBash
+        inputs:
+          commands:
+            - cd $HOME/data-cli
+            - export AWS_ACCOUNT_ID={{ awsAccountID }}
+            - export AWS_DEFAULT_REGION={{ awsRegion }}
+            - ECR_REPO="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+            - IMAGE_REPO_NAME="papi-kv-ecr-repo"
+            - IMAGE_REPO_TAG="tools_binaries_docker_image"
+            - REPO_PATH="${ECR_REPO}/${IMAGE_REPO_NAME}:${IMAGE_REPO_TAG}"
+            - echo "STARTING DOCKER LOGIN"
+            - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
+            - echo "STARTING BUILD OF AWS CLI + DATA CLI"
+            - cd $HOME/data-cli/
+            - NEW_IMAGE_REPO_TAG="papi-datacli-with-awscli"
+            - NEW_REPO_PATH="${ECR_REPO}/${IMAGE_REPO_NAME}:${NEW_IMAGE_REPO_TAG}"
+            - echo $NEW_REPO_PATH
+            - echo "COPYING FROM S3"
+            - aws s3 cp {{ s3UrlDockerFile }} ./
+            - aws s3 cp {{ s3UrlEntryPointScript }} ./
+            - echo "STARTING DOCKER BUILD"
+            - docker build -t $NEW_REPO_PATH --build-arg AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION .
+            - echo "RUNNING DOCKER INSPECT"
+            - docker inspect $NEW_REPO_PATH
+            - echo "PUSHING CONTAINER TO ECR"
+            - docker push $NEW_REPO_PATH
+            - echo "DONE"
