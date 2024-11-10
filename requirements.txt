@@ -25,4 +25,4 @@ typeguard==2.13.3
 typing_extensions==4.11.0
 tzdata==2024.1
 urllib3==1.26.18
-zipp==3.18.1
+zipp==3.19.1
